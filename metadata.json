@@ -1,0 +1,6 @@
+{
+  "name": "Prank Website",
+  "description": "A client-side interactive landing page prank website with glassmorphic visuals, screenshake, sound effects, and AdSense placeholders.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
