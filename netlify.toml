@@ -1,0 +1,11 @@
+# ⚡ Netlify Configuration File
+# This file configures Netlify for deploying this premium prank landing page.
+
+[build]
+  command = "npm run build"
+  publish = "dist"
+
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200

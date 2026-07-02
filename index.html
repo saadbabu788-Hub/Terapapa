@@ -15,6 +15,25 @@
   <link rel="stylesheet" href="style.css">
 
   <!-- ========================================== -->
+  <!-- CROSS-ORIGIN AD EXCEPTION SHIELD          -->
+  <!-- ========================================== -->
+  <script>
+    // Suppress generic cross-origin "Script error." and third-party ad network errors to keep the application console clean
+    window.addEventListener('error', function(event) {
+      const isCrossOriginError = event.message === 'Script error.' || !event.filename;
+      const isAdNetworkError = event.filename && (
+        event.filename.includes('effectivecpmnetwork') || 
+        event.filename.includes('highperformanceformat') ||
+        event.filename.includes('invoke.js')
+      );
+      if (isCrossOriginError || isAdNetworkError) {
+        event.stopImmediatePropagation();
+        event.preventDefault();
+      }
+    }, true);
+  </script>
+
+  <!-- ========================================== -->
   <!-- ADSTERRA ADVERTISING SCRIPT INTEGRATION     -->
   <!-- ========================================== -->
   <!-- Adsterra Popunder Script -->
@@ -190,6 +209,6 @@
   </div>
 
   <!-- Load script -->
-  <script src="script.js" defer></script>
+  <script type="module" src="/script.js"></script>
 </body>
 </html>
