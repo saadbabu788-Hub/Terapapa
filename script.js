@@ -5,6 +5,25 @@
  * and an Admin control panel for uploading custom audio.
  */
 
+import { initializeApp } from "firebase/app";
+import { getDatabase, ref as dbRef, set, onValue } from "firebase/database";
+import { getStorage, ref as storRef, uploadBytes, getDownloadURL } from "firebase/storage";
+
+const firebaseConfig = {
+  apiKey: "AIzaSyAC5oXzEncdw8lxkfL1DH2efyay2XZvqf4",
+  authDomain: "zoya-ai-4818e.firebaseapp.com",
+  databaseURL: "https://zoya-ai-4818e-default-rtdb.firebaseio.com",
+  projectId: "zoya-ai-4818e",
+  storageBucket: "zoya-ai-4818e.firebasestorage.app",
+  messagingSenderId: "477629523751",
+  appId: "1:477629523751:web:9ddf9f80e4d4fe3205eb02"
+};
+
+// Initialize Firebase
+const app = initializeApp(firebaseConfig);
+const database = getDatabase(app);
+const storage = getStorage(app);
+
 document.addEventListener("DOMContentLoaded", () => {
   // --- DOM Elements ---
   const landingScreen = document.getElementById("landing-screen");
@@ -110,6 +129,180 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
+  // --- Firebase Realtime & Storage Synchronization ---
+  function base64ToBlob(base64, mimeType) {
+    const byteCharacters = atob(base64);
+    const byteNumbers = new Array(byteCharacters.length);
+    for (let i = 0; i < byteCharacters.length; i++) {
+      byteNumbers[i] = byteCharacters.charCodeAt(i);
+    }
+    const byteArray = new Uint8Array(byteNumbers);
+    return new Blob([byteArray], { type: mimeType });
+  }
+
+  function blobToBase64(blob) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        const base64String = reader.result.split(",")[1];
+        resolve(base64String);
+      };
+      reader.onerror = reject;
+      reader.readAsDataURL(blob);
+    });
+  }
+
+  function listenToFirebaseAudio() {
+    const audioRef = dbRef(database, "customAudio");
+    onValue(audioRef, async (snapshot) => {
+      // Hide rules alert if connection is successful
+      const rulesAlert = document.getElementById("firebase-rules-alert");
+      if (rulesAlert) {
+        rulesAlert.style.display = "none";
+      }
+
+      const data = snapshot.val();
+      if (data) {
+        const { name, url, base64 } = data;
+        customAudioName = name || "firebase_audio.mp3";
+        
+        try {
+          if (url) {
+            // Option A: Storage direct link
+            const response = await fetch(url);
+            customAudioBlob = await response.blob();
+          } else if (base64) {
+            // Option B: Fallback base64
+            customAudioBlob = base64ToBlob(base64, "audio/mp3");
+          } else {
+            customAudioBlob = null;
+            customAudioName = "";
+          }
+        } catch (e) {
+          console.warn("Could not fetch binary file directly, falling back to url string reference:", e);
+          if (url) {
+            customAudioBlob = url; // Directly use public URL if fetch CORS fails
+          }
+        }
+      } else {
+        // Fallback to local IndexedDB if Firebase has no audio
+        loadCustomAudioFromDB();
+      }
+      updateAdminDashboardUI();
+    }, (error) => {
+      console.warn("Firebase listener notice (Firebase database rules may be locked/restricted):", error);
+      
+      // Check if it is a permission denied error
+      const isPermissionDenied = error && (
+        error.code === "PERMISSION_DENIED" || 
+        (error.message && error.message.toLowerCase().includes("permission")) ||
+        (error.message && error.message.toLowerCase().includes("denied"))
+      );
+
+      if (isPermissionDenied) {
+        const rulesAlert = document.getElementById("firebase-rules-alert");
+        if (rulesAlert) {
+          rulesAlert.style.display = "block";
+        }
+      }
+
+      // Fallback smoothly to local browser IndexedDB
+      loadCustomAudioFromDB();
+    });
+  }
+
+  async function uploadAudioToFirebase(file) {
+    currentAudioNameEl.textContent = "⏳ Uploading to Firebase...";
+    statusDot.classList.remove("active");
+    
+    try {
+      // 1. Try Firebase Storage upload
+      const audioStorageRef = storRef(storage, `custom_audio/${Date.now()}_${file.name}`);
+      const uploadResult = await uploadBytes(audioStorageRef, file);
+      const downloadURL = await getDownloadURL(uploadResult.ref);
+      
+      // Save metadata to Realtime Database
+      const audioDbRef = dbRef(database, "customAudio");
+      await set(audioDbRef, {
+        name: file.name,
+        url: downloadURL,
+        storagePath: uploadResult.ref.fullPath,
+        timestamp: Date.now()
+      });
+      
+      alert("🎉 Success! MP3 uploaded to Firebase and synchronized for all users!");
+    } catch (storageError) {
+      console.warn("Firebase Storage upload failed, attempting Realtime Database direct upload fallback:", storageError);
+      
+      if (file.size > 8 * 1024 * 1024) {
+        alert("Firebase Storage is locked, and the file is too large (> 8MB) to upload to Realtime Database. Please use an MP3 under 8MB!");
+        updateAdminDashboardUI();
+        return;
+      }
+      
+      try {
+        const base64 = await blobToBase64(file);
+        const audioDbRef = dbRef(database, "customAudio");
+        await set(audioDbRef, {
+          name: file.name,
+          base64: base64,
+          timestamp: Date.now()
+        });
+        alert("🎉 Success! MP3 uploaded to Firebase Realtime Database (Base64) and synchronized for all users!");
+      } catch (dbError) {
+        console.warn("Firebase Realtime Database upload also failed:", dbError);
+        
+        // Show rules alert if database write was permission denied
+        const isPermission = dbError && (
+          dbError.code === "PERMISSION_DENIED" || 
+          (dbError.message && dbError.message.toLowerCase().includes("permission")) ||
+          (dbError.message && dbError.message.toLowerCase().includes("denied"))
+        );
+        if (isPermission) {
+          const rulesAlert = document.getElementById("firebase-rules-alert");
+          if (rulesAlert) {
+            rulesAlert.style.display = "block";
+          }
+        }
+
+        alert("Failed to upload to Firebase. Please check security rules or network settings.");
+        updateAdminDashboardUI();
+      }
+    }
+  }
+
+  async function deleteAudioFromFirebase() {
+    currentAudioNameEl.textContent = "⏳ Resetting...";
+    try {
+      const audioDbRef = dbRef(database, "customAudio");
+      
+      // We will perform a single set(null) to remove the customAudio entry for everyone
+      await set(audioDbRef, null);
+      
+      // Also clear local IndexedDB to match
+      await deleteCustomAudioFromDB();
+      
+      alert("🎉 Audio reset successfully! Default audio.mp3 is restored for everyone.");
+    } catch (error) {
+      console.warn("Error resetting audio on Firebase:", error);
+      
+      const isPermission = error && (
+        error.code === "PERMISSION_DENIED" || 
+        (error.message && error.message.toLowerCase().includes("permission")) ||
+        (error.message && error.message.toLowerCase().includes("denied"))
+      );
+      if (isPermission) {
+        const rulesAlert = document.getElementById("firebase-rules-alert");
+        if (rulesAlert) {
+          rulesAlert.style.display = "block";
+        }
+      }
+
+      alert("Failed to reset audio on Firebase. Check rules or internet connection.");
+      updateAdminDashboardUI();
+    }
+  }
+
   function saveCustomAudioToDB(blob, name) {
     return new Promise((resolve, reject) => {
       if (!db) return reject("Database not initialized");
@@ -171,7 +364,10 @@ document.addEventListener("DOMContentLoaded", () => {
   let isTestingAudio = false;
 
   // Initialize DB
-  initDB();
+  initDB().then(() => {
+    // Start listening to Firebase audio updates to override local IndexedDB
+    listenToFirebaseAudio();
+  });
 
   // Admin Modal Controls
   adminTriggerBtn.addEventListener("click", () => {
@@ -274,14 +470,7 @@ document.addEventListener("DOMContentLoaded", () => {
       return;
     }
 
-    saveCustomAudioToDB(file, file.name)
-      .then(() => {
-        alert("🎉 MP3 audio file uploaded successfully to browser storage!");
-      })
-      .catch((err) => {
-        console.error(err);
-        alert("Failed to save audio to storage.");
-      });
+    uploadAudioToFirebase(file);
   }
 
   // --- Test Play Controller ---
@@ -299,7 +488,9 @@ document.addEventListener("DOMContentLoaded", () => {
         testAudioObj.pause();
       }
       try {
-        const audioUrl = URL.createObjectURL(customAudioBlob);
+        const audioUrl = (customAudioBlob instanceof Blob) 
+          ? URL.createObjectURL(customAudioBlob) 
+          : customAudioBlob;
         testAudioObj = new Audio(audioUrl);
         testAudioObj.volume = 0.8;
         testAudioObj.play()
@@ -329,14 +520,7 @@ document.addEventListener("DOMContentLoaded", () => {
         testAudioObj.pause();
         isTestingAudio = false;
       }
-      deleteCustomAudioFromDB()
-        .then(() => {
-          alert("Reset successfully to default audio.mp3");
-        })
-        .catch(err => {
-          console.error(err);
-          alert("Failed to delete custom audio.");
-        });
+      deleteAudioFromFirebase();
     }
   });
 
@@ -478,7 +662,9 @@ document.addEventListener("DOMContentLoaded", () => {
 
     if (customAudioBlob) {
       try {
-        audioSource = URL.createObjectURL(customAudioBlob);
+        audioSource = (customAudioBlob instanceof Blob) 
+          ? URL.createObjectURL(customAudioBlob) 
+          : customAudioBlob;
         isCustom = true;
       } catch (e) {
         console.error("Failed to generate URL for custom audio blob:", e);

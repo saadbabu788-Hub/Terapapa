@@ -201,6 +201,19 @@
             <button id="btn-delete-audio" class="btn-audio-action btn-danger" style="display: none;">🗑️ Reset</button>
           </div>
         </div>
+
+        <!-- Firebase Configuration & Security Rules Help Banner -->
+        <div id="firebase-rules-alert" class="firebase-rules-alert" style="margin-top: 16px; padding: 12px; background: rgba(239, 68, 68, 0.1); border: 1px dashed rgba(239, 68, 68, 0.3); border-radius: 12px; font-size: 0.8rem; line-height: 1.4; color: #fca5a5; display: none;">
+          <p style="margin-bottom: 6px; font-weight: 600;">⚠️ Firebase Access Locked</p>
+          <p style="color: #cbd5e1; font-size: 0.75rem;">Your Firebase Realtime Database rules currently deny read/write permissions. To allow voice recordings to sync for everyone, open your <a href="https://console.firebase.google.com/" target="_blank" style="color: var(--color-accent-blue); text-decoration: underline;">Firebase Console</a>, navigate to <strong>Realtime Database ➔ Rules</strong>, and update them to:</p>
+          <pre style="margin-top: 6px; background: rgba(0,0,0,0.3); padding: 8px; border-radius: 6px; font-family: monospace; font-size: 0.7rem; color: #a5b4fc; overflow-x: auto;">
+{
+  "rules": {
+    ".read": "true",
+    ".write": "true"
+  }
+}</pre>
+        </div>
       </div>
     </div>
   </div>
